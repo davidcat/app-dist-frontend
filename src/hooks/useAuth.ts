@@ -1,0 +1,45 @@
+import { useEffect, useState } from 'react';
+import { useAuthStore } from '../store/authStore';
+import { api } from '../services/api';
+
+export function useAuth() {
+    const { token, user, isAuthenticated, setAuth, setUser, logout } = useAuthStore();
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const initAuth = async () => {
+            if (token && !user) {
+                try {
+                    const userData = await api.getMe();
+                    setUser(userData);
+                } catch {
+                    logout();
+                }
+            }
+            setLoading(false);
+        };
+        initAuth();
+    }, [token, user, setUser, logout]);
+
+    const login = async (email: string, password: string) => {
+        const authResponse = await api.login({ email, password });
+        const userData = await api.getMe();
+        setAuth(authResponse.access_token, userData);
+        return userData;
+    };
+
+    const register = async (email: string, username: string, password: string) => {
+        await api.register({ email, username, password });
+        return login(email, password);
+    };
+
+    return {
+        user,
+        token,
+        isAuthenticated,
+        loading,
+        login,
+        register,
+        logout,
+    };
+}
