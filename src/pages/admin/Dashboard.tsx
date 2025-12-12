@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { Header } from '../../components/common/Header';
 import { Footer } from '../../components/common/Footer';
 import { Loading } from '../../components/common/Loading';
@@ -173,8 +172,8 @@ export function AdminDashboard() {
                         <button
                             onClick={() => setActiveTab('users')}
                             className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'users'
-                                    ? 'bg-white text-gray-900 shadow-sm'
-                                    : 'text-gray-600 hover:text-gray-900'
+                                ? 'bg-white text-gray-900 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
                                 }`}
                         >
                             用户管理
@@ -182,8 +181,8 @@ export function AdminDashboard() {
                         <button
                             onClick={() => setActiveTab('apps')}
                             className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === 'apps'
-                                    ? 'bg-white text-gray-900 shadow-sm'
-                                    : 'text-gray-600 hover:text-gray-900'
+                                ? 'bg-white text-gray-900 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
                                 }`}
                         >
                             应用管理
@@ -254,8 +253,8 @@ export function AdminDashboard() {
                                                 <button
                                                     onClick={() => handleToggleUserStatus(user)}
                                                     className={`p-2 rounded-lg transition-colors ${user.is_active
-                                                            ? 'text-gray-500 hover:text-red-600 hover:bg-red-50'
-                                                            : 'text-gray-500 hover:text-green-600 hover:bg-green-50'
+                                                        ? 'text-gray-500 hover:text-red-600 hover:bg-red-50'
+                                                        : 'text-gray-500 hover:text-green-600 hover:bg-green-50'
                                                         }`}
                                                     title={user.is_active ? '禁用用户' : '启用用户'}
                                                 >
@@ -264,8 +263,8 @@ export function AdminDashboard() {
                                                 <button
                                                     onClick={() => handleToggleAdmin(user)}
                                                     className={`p-2 rounded-lg transition-colors ${user.is_admin
-                                                            ? 'text-purple-600 hover:bg-purple-50'
-                                                            : 'text-gray-500 hover:text-purple-600 hover:bg-purple-50'
+                                                        ? 'text-purple-600 hover:bg-purple-50'
+                                                        : 'text-gray-500 hover:text-purple-600 hover:bg-purple-50'
                                                         }`}
                                                     title={user.is_admin ? '取消管理员' : '设为管理员'}
                                                 >

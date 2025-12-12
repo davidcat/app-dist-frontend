@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { Smartphone, LogOut, User, Shield, Menu, X, Upload } from 'lucide-react';
+import { Smartphone, LogOut, Shield, Menu, X, Upload } from 'lucide-react';
 import { useState } from 'react';
 
 export function Header() {
