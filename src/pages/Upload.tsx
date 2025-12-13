@@ -98,24 +98,35 @@ export function Upload() {
         try {
             // 1. 先创建或获取应用
             let appId: number;
-            try {
-                const app = await api.createApp({
-                    bundle_id: packageInfo.bundle_id,
-                    name: packageInfo.app_name,
-                    platform: packageInfo.platform,
-                    is_public: true,
-                });
-                appId = app.id;
-                setCreatedApp(app);
-            } catch {
-                // 如果应用已存在，获取现有应用
-                const apps = await api.getApps(1, 100);
-                const existingApp = apps.items.find(a => a.bundle_id === packageInfo.bundle_id);
-                if (existingApp) {
-                    appId = existingApp.id;
-                    setCreatedApp(existingApp);
-                } else {
-                    throw new Error('创建应用失败');
+
+            // 先检查是否已存在
+            const apps = await api.getApps(1, 100);
+            const existingApp = apps.items.find(a => a.bundle_id === packageInfo.bundle_id);
+
+            if (existingApp) {
+                appId = existingApp.id;
+                setCreatedApp(existingApp);
+            } else {
+                // 创建新应用
+                try {
+                    const app = await api.createApp({
+                        bundle_id: packageInfo.bundle_id,
+                        name: packageInfo.app_name,
+                        platform: packageInfo.platform,
+                        is_public: true,
+                    });
+                    appId = app.id;
+                    setCreatedApp(app);
+                } catch (createErr: unknown) {
+                    // 创建失败，提取详细错误
+                    let errorMsg = '创建应用失败';
+                    if (createErr && typeof createErr === 'object') {
+                        const axiosError = createErr as { response?: { data?: { detail?: string } }; message?: string };
+                        if (axiosError.response?.data?.detail) {
+                            errorMsg = axiosError.response.data.detail;
+                        }
+                    }
+                    throw new Error(errorMsg);
                 }
             }
 
