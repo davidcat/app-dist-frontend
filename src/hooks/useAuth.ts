@@ -23,6 +23,8 @@ export function useAuth() {
 
     const login = async (email: string, password: string) => {
         const authResponse = await api.login({ email, password });
+        // 先设置 token，再获取用户信息
+        useAuthStore.getState().setToken(authResponse.access_token);
         const userData = await api.getMe();
         setAuth(authResponse.access_token, userData);
         return userData;
