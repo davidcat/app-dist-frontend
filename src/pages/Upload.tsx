@@ -9,45 +9,74 @@ import {
     Upload as UploadIcon,
     Smartphone,
     Apple,
-    FileUp,
     Loader2,
     Check,
     X,
+    Package,
 } from 'lucide-react';
+
+interface ParsedPackageInfo {
+    app_name: string;
+    bundle_id: string;
+    version_name: string;
+    version_code: string;
+    platform: 'android' | 'ios';
+}
 
 export function Upload() {
     const navigate = useNavigate();
-    const [step, setStep] = useState<'app' | 'file' | 'uploading' | 'done'>('app');
-    const [platform, setPlatform] = useState<'android' | 'ios'>('android');
+    const [step, setStep] = useState<'upload' | 'uploading' | 'done'>('upload');
     const [file, setFile] = useState<File | null>(null);
     const [uploadProgress, setUploadProgress] = useState(0);
+    const [parsing, setParsing] = useState(false);
+    const [parseError, setParseError] = useState<string | null>(null);
+    const [packageInfo, setPackageInfo] = useState<ParsedPackageInfo | null>(null);
 
-    // App form
-    const [bundleId, setBundleId] = useState('');
-    const [appName, setAppName] = useState('');
-    const [description, setDescription] = useState('');
-    const [isPublic, setIsPublic] = useState(true);
-
-    // Version form
-    const [versionCode, setVersionCode] = useState('');
-    const [versionName, setVersionName] = useState('');
-    const [channel, setChannel] = useState('default');
+    // 只需要用户填写更新说明
     const [releaseNotes, setReleaseNotes] = useState('');
-    const [forceUpdate, setForceUpdate] = useState(false);
-
     const [createdApp, setCreatedApp] = useState<{ id: number; name: string } | null>(null);
+
+    const parsePackage = async (selectedFile: File) => {
+        setParsing(true);
+        setParseError(null);
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+
+        try {
+            const info = await api.parsePackage(formData);
+            setPackageInfo(info);
+        } catch (err: unknown) {
+            // 显示后台错误信息
+            let errorMessage = '解析安装包失败';
+            if (err && typeof err === 'object') {
+                const axiosError = err as { response?: { data?: { detail?: string } }; message?: string };
+                if (axiosError.response?.data?.detail) {
+                    errorMessage = axiosError.response.data.detail;
+                } else if (axiosError.message) {
+                    errorMessage = axiosError.message;
+                }
+            }
+            setParseError(errorMessage);
+
+            // 解析失败时使用文件名作为应用名
+            const isIos = selectedFile.name.endsWith('.ipa');
+            setPackageInfo({
+                app_name: selectedFile.name.replace(/\.(apk|ipa)$/i, ''),
+                bundle_id: 'com.unknown.app',
+                version_name: '1.0.0',
+                version_code: '1',
+                platform: isIos ? 'ios' : 'android',
+            });
+        } finally {
+            setParsing(false);
+        }
+    };
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
         if (acceptedFiles.length > 0) {
             const f = acceptedFiles[0];
             setFile(f);
-
-            // Auto-detect platform
-            if (f.name.endsWith('.apk')) {
-                setPlatform('android');
-            } else if (f.name.endsWith('.ipa')) {
-                setPlatform('ios');
-            }
+            parsePackage(f);
         }
     }, []);
 
@@ -61,374 +90,235 @@ export function Upload() {
         maxSize: 500 * 1024 * 1024, // 500MB
     });
 
-    const handleCreateApp = async (e: React.FormEvent) => {
-        e.preventDefault();
-
-        try {
-            const app = await api.createApp({
-                bundle_id: bundleId,
-                name: appName,
-                description: description || undefined,
-                platform,
-                is_public: isPublic,
-            });
-
-            setCreatedApp(app);
-            setStep('file');
-            toast.success('应用创建成功！');
-        } catch (error) {
-            toast.error('创建失败，包名可能已存在。');
-        }
-    };
-
     const handleUpload = async () => {
-        if (!file || !createdApp) return;
+        if (!file || !packageInfo) return;
 
         setStep('uploading');
 
         try {
+            // 1. 先创建或获取应用
+            let appId: number;
+            try {
+                const app = await api.createApp({
+                    bundle_id: packageInfo.bundle_id,
+                    name: packageInfo.app_name,
+                    platform: packageInfo.platform,
+                    is_public: true,
+                });
+                appId = app.id;
+                setCreatedApp(app);
+            } catch {
+                // 如果应用已存在，获取现有应用
+                const apps = await api.getApps(1, 100);
+                const existingApp = apps.items.find(a => a.bundle_id === packageInfo.bundle_id);
+                if (existingApp) {
+                    appId = existingApp.id;
+                    setCreatedApp(existingApp);
+                } else {
+                    throw new Error('创建应用失败');
+                }
+            }
+
+            // 2. 上传版本
             await api.uploadVersion(
-                createdApp.id,
+                appId,
                 file,
                 {
-                    version_code: versionCode,
-                    version_name: versionName,
-                    channel,
+                    version_code: packageInfo.version_code,
+                    version_name: packageInfo.version_name,
+                    channel: 'default',
                     release_notes: releaseNotes || undefined,
-                    force_update: forceUpdate,
+                    force_update: false,
                 },
                 (progress) => setUploadProgress(progress)
             );
 
             setStep('done');
-            toast.success('版本上传成功！');
-        } catch (error) {
-            setStep('file');
-            toast.error('上传失败，请重试。');
+            toast.success('上传成功！');
+        } catch (error: unknown) {
+            setStep('upload');
+            // 提取后端详细错误信息
+            let message = '上传失败，请重试';
+            if (error && typeof error === 'object') {
+                const axiosError = error as { response?: { data?: { detail?: string } }; message?: string };
+                if (axiosError.response?.data?.detail) {
+                    message = axiosError.response.data.detail;
+                } else if (axiosError.message) {
+                    message = axiosError.message;
+                }
+            }
+            toast.error(message);
         }
+    };
+
+    const formatFileSize = (bytes: number) => {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     };
 
     return (
         <div className="min-h-screen flex flex-col bg-gray-50">
             <Header />
 
-            <main className="flex-1 max-w-3xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
-                <div className="mb-8">
-                    <h1 className="text-3xl font-bold text-gray-900">上传应用</h1>
-                    <p className="text-gray-500 mt-2">
-                        创建新应用并上传第一个版本
+            <main className="flex-1 max-w-2xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+                <div className="mb-6">
+                    <h1 className="text-2xl font-bold text-gray-900">上传应用</h1>
+                    <p className="text-gray-500 mt-1 text-sm">
+                        拖拽 APK 或 IPA 文件，自动识别应用信息
                     </p>
                 </div>
 
-                {/* Progress Steps */}
-                <div className="flex items-center mb-8">
-                    {['应用信息', '上传文件', '完成'].map((label, index) => (
-                        <div key={label} className="flex items-center">
-                            <div
-                                className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${index === 0 && step === 'app'
-                                        ? 'bg-primary-600 text-white'
-                                        : index === 1 && (step === 'file' || step === 'uploading')
-                                            ? 'bg-primary-600 text-white'
-                                            : index === 2 && step === 'done'
-                                                ? 'bg-green-600 text-white'
-                                                : (index === 0 && step !== 'app') || (index === 1 && step === 'done')
-                                                    ? 'bg-green-600 text-white'
-                                                    : 'bg-gray-200 text-gray-600'
-                                    }`}
-                            >
-                                {((index === 0 && step !== 'app') || (index === 1 && step === 'done')) ? (
-                                    <Check className="w-4 h-4" />
-                                ) : (
-                                    index + 1
-                                )}
-                            </div>
-                            <span className={`ml-2 text-sm ${index === 2 ? '' : 'mr-4'} ${(index === 0 && step === 'app') ||
-                                    (index === 1 && (step === 'file' || step === 'uploading')) ||
-                                    (index === 2 && step === 'done')
-                                    ? 'text-gray-900 font-medium'
-                                    : 'text-gray-500'
-                                }`}>
-                                {label}
-                            </span>
-                            {index < 2 && (
-                                <div className="w-12 h-px bg-gray-300 mx-2"></div>
-                            )}
-                        </div>
-                    ))}
-                </div>
-
-                {/* Step 1: App Info */}
-                {step === 'app' && (
-                    <div className="card p-6">
-                        <h2 className="text-xl font-semibold text-gray-900 mb-6">应用信息</h2>
-
-                        {/* Platform Selection */}
-                        <div className="mb-6">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                平台
-                            </label>
-                            <div className="grid grid-cols-2 gap-4">
-                                <button
-                                    type="button"
-                                    onClick={() => setPlatform('android')}
-                                    className={`p-4 rounded-xl border-2 transition-all ${platform === 'android'
-                                            ? 'border-green-500 bg-green-50'
-                                            : 'border-gray-200 hover:border-gray-300'
-                                        }`}
-                                >
-                                    <Smartphone className={`w-8 h-8 mx-auto mb-2 ${platform === 'android' ? 'text-green-600' : 'text-gray-400'
-                                        }`} />
-                                    <span className={`font-medium ${platform === 'android' ? 'text-green-700' : 'text-gray-600'
-                                        }`}>Android</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setPlatform('ios')}
-                                    className={`p-4 rounded-xl border-2 transition-all ${platform === 'ios'
-                                            ? 'border-blue-500 bg-blue-50'
-                                            : 'border-gray-200 hover:border-gray-300'
-                                        }`}
-                                >
-                                    <Apple className={`w-8 h-8 mx-auto mb-2 ${platform === 'ios' ? 'text-blue-600' : 'text-gray-400'
-                                        }`} />
-                                    <span className={`font-medium ${platform === 'ios' ? 'text-blue-700' : 'text-gray-600'
-                                        }`}>iOS</span>
-                                </button>
-                            </div>
-                        </div>
-
-                        <form onSubmit={handleCreateApp} className="space-y-5">
-                            <div>
-                                <label htmlFor="bundleId" className="block text-sm font-medium text-gray-700 mb-1">
-                                    包名 (Bundle ID) *
-                                </label>
-                                <input
-                                    id="bundleId"
-                                    type="text"
-                                    value={bundleId}
-                                    onChange={(e) => setBundleId(e.target.value)}
-                                    className="input"
-                                    placeholder="com.example.myapp"
-                                    required
-                                />
-                            </div>
-
-                            <div>
-                                <label htmlFor="appName" className="block text-sm font-medium text-gray-700 mb-1">
-                                    应用名称 *
-                                </label>
-                                <input
-                                    id="appName"
-                                    type="text"
-                                    value={appName}
-                                    onChange={(e) => setAppName(e.target.value)}
-                                    className="input"
-                                    placeholder="我的应用"
-                                    required
-                                />
-                            </div>
-
-                            <div>
-                                <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
-                                    应用描述
-                                </label>
-                                <textarea
-                                    id="description"
-                                    value={description}
-                                    onChange={(e) => setDescription(e.target.value)}
-                                    className="input"
-                                    rows={3}
-                                    placeholder="简单介绍一下您的应用"
-                                />
-                            </div>
-
-                            <div className="flex items-center">
-                                <input
-                                    id="isPublic"
-                                    type="checkbox"
-                                    checked={isPublic}
-                                    onChange={(e) => setIsPublic(e.target.checked)}
-                                    className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-                                />
-                                <label htmlFor="isPublic" className="ml-2 text-sm text-gray-700">
-                                    公开应用 (任何人可通过链接下载)
-                                </label>
-                            </div>
-
-                            <button type="submit" className="btn-primary w-full py-3">
-                                下一步
-                            </button>
-                        </form>
-                    </div>
-                )}
-
-                {/* Step 2: File Upload */}
-                {(step === 'file' || step === 'uploading') && (
-                    <div className="card p-6">
-                        <h2 className="text-xl font-semibold text-gray-900 mb-6">
-                            上传 {platform === 'android' ? 'APK' : 'IPA'} 文件
-                        </h2>
-
+                {/* Upload Step */}
+                {step === 'upload' && (
+                    <div className="space-y-6">
                         {/* Dropzone */}
                         <div
                             {...getRootProps()}
                             className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${isDragActive
-                                    ? 'border-primary-500 bg-primary-50'
-                                    : file
-                                        ? 'border-green-500 bg-green-50'
-                                        : 'border-gray-300 hover:border-primary-400'
+                                ? 'border-primary-500 bg-primary-50'
+                                : file
+                                    ? 'border-green-500 bg-green-50'
+                                    : 'border-gray-300 hover:border-primary-400 bg-white'
                                 }`}
                         >
                             <input {...getInputProps()} />
                             {file ? (
-                                <div className="flex items-center justify-center space-x-3">
-                                    <FileUp className="w-8 h-8 text-green-600" />
+                                <div className="flex items-center justify-center space-x-4">
+                                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${packageInfo?.platform === 'ios' ? 'bg-blue-100' : 'bg-green-100'
+                                        }`}>
+                                        {packageInfo?.platform === 'ios'
+                                            ? <Apple className="w-6 h-6 text-blue-600" />
+                                            : <Smartphone className="w-6 h-6 text-green-600" />
+                                        }
+                                    </div>
                                     <div className="text-left">
                                         <p className="font-medium text-gray-900">{file.name}</p>
-                                        <p className="text-sm text-gray-500">
-                                            {(file.size / (1024 * 1024)).toFixed(2)} MB
-                                        </p>
+                                        <p className="text-sm text-gray-500">{formatFileSize(file.size)}</p>
                                     </div>
                                     <button
                                         type="button"
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             setFile(null);
+                                            setPackageInfo(null);
                                         }}
-                                        className="p-1 text-gray-400 hover:text-red-600"
+                                        className="p-2 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-50"
                                     >
                                         <X className="w-5 h-5" />
                                     </button>
                                 </div>
                             ) : (
                                 <>
-                                    <UploadIcon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                                    <UploadIcon className="w-12 h-12 text-gray-400 mx-auto mb-3" />
                                     <p className="text-gray-600 font-medium">
-                                        {isDragActive
-                                            ? '放开以上传文件'
-                                            : `拖拽 ${platform === 'android' ? 'APK' : 'IPA'} 文件到此处`}
+                                        {isDragActive ? '放开以上传' : '拖拽安装包到此处'}
                                     </p>
-                                    <p className="text-sm text-gray-500 mt-1">
-                                        或点击选择文件 (最大 500MB)
+                                    <p className="text-sm text-gray-400 mt-1">
+                                        支持 APK 和 IPA 文件，最大 500MB
                                     </p>
                                 </>
                             )}
                         </div>
 
-                        {/* Version Info */}
-                        {file && step === 'file' && (
-                            <div className="mt-6 space-y-5">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            版本号 *
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={versionName}
-                                            onChange={(e) => setVersionName(e.target.value)}
-                                            className="input"
-                                            placeholder="1.0.0"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            构建号 *
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={versionCode}
-                                            onChange={(e) => setVersionCode(e.target.value)}
-                                            className="input"
-                                            placeholder="1"
-                                            required
-                                        />
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        渠道
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={channel}
-                                        onChange={(e) => setChannel(e.target.value)}
-                                        className="input"
-                                        placeholder="default"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        更新说明
-                                    </label>
-                                    <textarea
-                                        value={releaseNotes}
-                                        onChange={(e) => setReleaseNotes(e.target.value)}
-                                        className="input"
-                                        rows={3}
-                                        placeholder="这个版本有什么新功能？"
-                                    />
-                                </div>
-
-                                <div className="flex items-center">
-                                    <input
-                                        id="forceUpdate"
-                                        type="checkbox"
-                                        checked={forceUpdate}
-                                        onChange={(e) => setForceUpdate(e.target.checked)}
-                                        className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-                                    />
-                                    <label htmlFor="forceUpdate" className="ml-2 text-sm text-gray-700">
-                                        强制更新 (用户必须更新才能使用)
-                                    </label>
-                                </div>
-
-                                <button
-                                    type="button"
-                                    onClick={handleUpload}
-                                    disabled={!versionName || !versionCode}
-                                    className="btn-primary w-full py-3"
-                                >
-                                    上传版本
-                                </button>
+                        {/* Parsing indicator */}
+                        {parsing && (
+                            <div className="flex items-center justify-center space-x-2 text-gray-500">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span className="text-sm">正在解析安装包...</span>
                             </div>
                         )}
 
-                        {/* Uploading Progress */}
-                        {step === 'uploading' && (
-                            <div className="mt-6">
-                                <div className="flex items-center justify-center space-x-3 mb-4">
-                                    <Loader2 className="w-6 h-6 text-primary-600 animate-spin" />
-                                    <span className="text-gray-700 font-medium">上传中...</span>
+                        {/* Parsed Info */}
+                        {packageInfo && !parsing && (
+                            <div className="card p-4 space-y-3">
+                                <div className="flex items-center space-x-2 text-sm font-medium text-gray-700">
+                                    <Package className="w-4 h-4" />
+                                    <span>识别信息</span>
                                 </div>
-                                <div className="w-full bg-gray-200 rounded-full h-2">
-                                    <div
-                                        className="gradient-bg h-2 rounded-full transition-all duration-300"
-                                        style={{ width: `${uploadProgress}%` }}
-                                    />
+                                <div className="grid grid-cols-2 gap-3 text-sm">
+                                    <div>
+                                        <span className="text-gray-500">应用名称：</span>
+                                        <span className="text-gray-900 ml-1">{packageInfo.app_name}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-gray-500">平台：</span>
+                                        <span className={`ml-1 ${packageInfo.platform === 'ios' ? 'text-blue-600' : 'text-green-600'}`}>
+                                            {packageInfo.platform === 'ios' ? 'iOS' : 'Android'}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span className="text-gray-500">包名：</span>
+                                        <span className="text-gray-900 ml-1 text-xs">{packageInfo.bundle_id}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-gray-500">版本：</span>
+                                        <span className="text-gray-900 ml-1">v{packageInfo.version_name}</span>
+                                    </div>
                                 </div>
-                                <p className="text-center text-sm text-gray-500 mt-2">
-                                    已完成 {uploadProgress}%
-                                </p>
+                                {parseError && (
+                                    <div className="mt-3 p-2 bg-orange-50 border border-orange-200 rounded-lg text-orange-700 text-xs">
+                                        ⚠️ {parseError}（使用默认值，可能需要手动修正）
+                                    </div>
+                                )}
                             </div>
+                        )}
+
+                        {/* Release Notes */}
+                        {file && packageInfo && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    更新说明 <span className="text-gray-400 font-normal">(可选)</span>
+                                </label>
+                                <textarea
+                                    value={releaseNotes}
+                                    onChange={(e) => setReleaseNotes(e.target.value)}
+                                    className="input"
+                                    rows={3}
+                                    placeholder="这个版本有什么新功能？"
+                                />
+                            </div>
+                        )}
+
+                        {/* Upload Button */}
+                        {file && packageInfo && (
+                            <button
+                                onClick={handleUpload}
+                                className="btn-primary w-full py-3"
+                            >
+                                <UploadIcon className="w-5 h-5 mr-2" />
+                                上传
+                            </button>
                         )}
                     </div>
                 )}
 
-                {/* Step 3: Done */}
+                {/* Uploading Progress */}
+                {step === 'uploading' && (
+                    <div className="card p-8 text-center">
+                        <Loader2 className="w-10 h-10 text-primary-600 animate-spin mx-auto mb-4" />
+                        <p className="text-gray-700 font-medium mb-4">上传中...</p>
+                        <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
+                            <div
+                                className="gradient-bg h-2 rounded-full transition-all duration-300"
+                                style={{ width: `${uploadProgress}%` }}
+                            />
+                        </div>
+                        <p className="text-sm text-gray-500">{uploadProgress}%</p>
+                    </div>
+                )}
+
+                {/* Done */}
                 {step === 'done' && (
                     <div className="card p-8 text-center">
-                        <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-                            <Check className="w-8 h-8 text-green-600" />
+                        <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+                            <Check className="w-7 h-7 text-green-600" />
                         </div>
-                        <h2 className="text-2xl font-bold text-gray-900 mb-2">上传完成！</h2>
-                        <p className="text-gray-600 mb-6">
-                            您的应用已上传成功，可以开始分发了。
+                        <h2 className="text-xl font-bold text-gray-900 mb-2">上传成功</h2>
+                        <p className="text-gray-500 mb-6 text-sm">
+                            应用已上传，可以开始分发了
                         </p>
-                        <div className="flex justify-center space-x-4">
+                        <div className="flex justify-center space-x-3">
                             <button
                                 onClick={() => navigate(`/apps/${createdApp?.id}`)}
                                 className="btn-primary"
@@ -439,7 +329,7 @@ export function Upload() {
                                 onClick={() => navigate('/dashboard')}
                                 className="btn-secondary"
                             >
-                                返回控制台
+                                返回
                             </button>
                         </div>
                     </div>

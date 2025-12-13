@@ -22,7 +22,23 @@ export function LoginForm() {
             toast.success('登录成功');
             navigate('/dashboard');
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : '登录失败，请检查邮箱和密码';
+            // 解析后端返回的错误信息
+            let message = '登录失败，请检查邮箱和密码';
+            if (err && typeof err === 'object') {
+                const axiosError = err as { response?: { data?: { detail?: string } }; message?: string };
+                if (axiosError.response?.data?.detail) {
+                    const detail = axiosError.response.data.detail;
+                    if (detail === 'Incorrect email or password') {
+                        message = '邮箱或密码错误';
+                    } else if (detail === 'User account is disabled') {
+                        message = '账户已被禁用';
+                    } else {
+                        message = detail;
+                    }
+                } else if (axiosError.message) {
+                    message = axiosError.message;
+                }
+            }
             setError(message);
         } finally {
             setLoading(false);

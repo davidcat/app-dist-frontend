@@ -182,6 +182,20 @@ class ApiService {
         const { data } = await this.client.patch(`/api/admin/apps/${id}/toggle-public`);
         return data;
     }
+
+    // Package parsing
+    async parsePackage(formData: FormData): Promise<{
+        app_name: string;
+        bundle_id: string;
+        version_name: string;
+        version_code: string;
+        platform: 'android' | 'ios';
+    }> {
+        const { data } = await this.client.post('/api/parse-package', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return data;
+    }
 }
 
 export const api = new ApiService();

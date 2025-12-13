@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore, selectIsAuthenticated } from '../store/authStore';
 import { api } from '../services/api';
 
 export function useAuth() {
-    const { token, user, isAuthenticated, setAuth, setUser, logout } = useAuthStore();
+    const token = useAuthStore((state) => state.token);
+    const user = useAuthStore((state) => state.user);
+    const isAuthenticated = useAuthStore(selectIsAuthenticated);
+    const setAuth = useAuthStore((state) => state.setAuth);
+    const setUser = useAuthStore((state) => state.setUser);
+    const logout = useAuthStore((state) => state.logout);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {

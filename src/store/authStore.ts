@@ -5,7 +5,6 @@ import type { User } from '../types';
 interface AuthState {
     token: string | null;
     user: User | null;
-    isAuthenticated: boolean;
     setToken: (token: string) => void;
     setAuth: (token: string, user: User) => void;
     setUser: (user: User) => void;
@@ -17,7 +16,6 @@ export const useAuthStore = create<AuthState>()(
         (set) => ({
             token: null,
             user: null,
-            isAuthenticated: false,
             setToken: (token) =>
                 set({
                     token,
@@ -26,7 +24,6 @@ export const useAuthStore = create<AuthState>()(
                 set({
                     token,
                     user,
-                    isAuthenticated: true,
                 }),
             setUser: (user) =>
                 set({
@@ -36,7 +33,6 @@ export const useAuthStore = create<AuthState>()(
                 set({
                     token: null,
                     user: null,
-                    isAuthenticated: false,
                 }),
         }),
         {
@@ -45,3 +41,6 @@ export const useAuthStore = create<AuthState>()(
         }
     )
 );
+
+// Helper selector to check if authenticated
+export const selectIsAuthenticated = (state: AuthState) => !!state.token;

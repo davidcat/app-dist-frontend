@@ -35,7 +35,24 @@ export function RegisterForm() {
             toast.success('注册成功');
             navigate('/dashboard');
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : '注册失败，请重试';
+            // 解析后端返回的错误信息
+            let message = '注册失败，请重试';
+            if (err && typeof err === 'object') {
+                const axiosError = err as { response?: { data?: { detail?: string } }; message?: string };
+                if (axiosError.response?.data?.detail) {
+                    // 翻译常见错误信息
+                    const detail = axiosError.response.data.detail;
+                    if (detail === 'Email already registered') {
+                        message = '该邮箱已被注册';
+                    } else if (detail === 'Username already taken') {
+                        message = '该用户名已被使用';
+                    } else {
+                        message = detail;
+                    }
+                } else if (axiosError.message) {
+                    message = axiosError.message;
+                }
+            }
             setError(message);
         } finally {
             setLoading(false);
